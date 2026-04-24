@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLAZE AI Search // Unified Edition</title>
+    <style>
+        body {
+            font-family: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            /* Removed solid background to allow camera feed to show */
+            background-color: transparent; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 90px 20px 40px 20px;
+            margin: 0;
+            box-sizing: border-box;
+            color: #e3e3e3;
+            overflow-x: hidden;
+        }
+
+        /* --- BACKGROUND CAMERA VIEW --- */
+        #camera-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: -1; /* Keeps video behind everything */
+            background-color: #0e0e0f; /* Fallback if camera fails */
+        }
+
+        /* --- RGB TOP HUD BAR (UNCHANGED) --- */
+        .blaze-top-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 38px;
+            background: rgba(10, 10, 11, 0.95);
+            backdrop-filter: blur(15px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            box-sizing: border-box;
+            z-index: 1100;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .rgb-line {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, #ff0000, #ff9800, #00bcd4, #9c27b0, #ff0000);
+            background-size: 400% 100%;
+            animation: rgbFlow 6s linear infinite;
+        }
+
+        #blaze-time, #blaze-date, #blaze-coords {
+            animation: textChroma 8s linear infinite;
+            cursor: pointer;
+        }
+
+        /* Top Loading Bar */
+        .glowing-loader {
+            position: fixed;
+            top: 38px;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, #ff5722, #ff9800, #03a9f4, #00bcd4, #ff5722);
+            background-size: 200% 100%;
+            animation: gradientMove 1.5s linear infinite;
+            box-shadow: 0 0 15px rgba(255, 87, 34, 0.6), 0 0 15px rgba(3, 169, 244, 0.6);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+
+        .glowing-loader.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Search Layout */
+        .search-container {
+            width: 100%;
+            max-width: 720px;
+            display: flex;
+            flex-direction: column;
+            z-index: 2;
+        }
+
+        h1 {
+            text-align: center;
+            color: #ffffff;
+            font-size: 28px;
+            font-weight: 500;
+            margin: 0 0 30px 0;
+            transition: display 0.3s ease;
+            /* Added slight text shadow to make it readable over camera */
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+        }
+
+        .highlight-text {
+            background: -webkit-linear-gradient(0deg, #ff9800, #ff5722);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: bold;
+        }
+
+        /* --- APPLE VISION PRO GLASS EFFECT: SEARCH BAR --- */
+        .input-group {
+            display: flex;
+            background: rgba(25, 25, 30, 0.4);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border-radius: 20px;
+            padding: 10px 16px 10px 24px;
+            align-items: center;
+            min-height: 64px;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .input-group:focus-within {
+            border-color: rgba(255, 87, 34, 0.6);
+            box-shadow: 0 0 20px rgba(255, 87, 34, 0.3), 0 8px 32px rgba(0,0,0,0.4);
+            background: rgba(35, 35, 40, 0.5);
+        }
+
+        input[type="text"] {
+            flex: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            font-size: 16px;
+            color: #ffffff;
+            font-family: inherit;
+        }
+
+        input[type="text"]::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .clear-btn, .send-btn {
+            background: none;
+            border: none;
+            padding: 8px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            color: #c4c7c5;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+
+        .clear-btn { display: none; margin-right: 4px; }
+        .send-btn { display: flex; color: #ff9800; }
+
+        .clear-btn:hover { background-color: rgba(255, 255, 255, 0.1); color: #fff; }
+        .send-btn:hover { background-color: rgba(255, 152, 0, 0.15); color: #ff5722; transform: scale(1.1); }
+
+        .clear-btn svg, .send-btn svg { width: 22px; height: 22px; fill: currentColor; }
+
+        /* Results Container */
+        #results {
+            width: 100%;
+            max-width: 720px;
+            margin-top: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding-bottom: 120px; 
+        }
+
+        .user-query-row {
+            display: flex;
+            justify-content: flex-end;
+            width: 100%;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* --- APPLE VISION PRO GLASS EFFECT: USER BUBBLE --- */
+        .user-bubble {
+            background: rgba(40, 40, 45, 0.4);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 20px 20px 4px 20px;
+            font-size: 16px;
+            max-width: 85%;
+            word-wrap: break-word;
+        }
+
+        /* --- APPLE VISION PRO GLASS EFFECT: BLAZE ANSWER FORMAT --- */
+        .ai-response-row {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            animation: fadeIn 0.4s ease-out;
+            background: rgba(25, 25, 30, 0.45);
+            backdrop-filter: blur(30px) saturate(200%);
+            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-left: 3px solid #ff5722;
+            padding: 24px;
+            border-radius: 16px;
+            box-sizing: border-box;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        }
+
+        .ai-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 12px;
+        }
+        
+        .ai-header-left { display: flex; align-items: center; gap: 12px; }
+
+        .ai-title-text {
+            font-weight: 600;
+            color: #ff9800;
+            font-size: 18px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px rgba(255, 152, 0, 0.3);
+        }
+
+        /* Speaker Button Styles */
+        .speaker-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #e3e3e3;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .speaker-btn:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+        .speaker-btn.playing { background: #ff5722; color: #fff; border-color: #ff5722; box-shadow: 0 0 10px #ff5722; }
+
+        .ai-answer { font-size: 16px; line-height: 1.6; color: #ffffff; }
+        .ai-answer p { margin-top: 0; margin-bottom: 14px; }
+        .ai-answer strong { color: #ffffff; font-weight: 600; }
+
+        /* Skeletons updated for glassmorphism */
+        .skeleton-loader { display: flex; flex-direction: column; gap: 12px; }
+        .skeleton-line {
+            height: 16px;
+            border-radius: 6px;
+            background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite linear;
+        }
+        .skeleton-title { width: 40%; height: 20px; margin-bottom: 8px; }
+        .skeleton-line.short { width: 70%; }
+
+        /* BLAZE CORE HUD ANIMATION */
+        .blaze-core {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .blaze-ring { position: absolute; border-radius: 50%; box-sizing: border-box; }
+
+        .ring-1 {
+            width: 100%; height: 100%;
+            border: 2px solid transparent; border-top: 2px solid #ff5722; border-right: 2px solid #ff9800;
+            animation: spin 6s linear infinite; box-shadow: 0 0 10px rgba(255, 87, 34, 0.4);
+        }
+
+        .ring-2 {
+            width: 75%; height: 75%;
+            border: 2px solid transparent; border-bottom: 2px solid #03a9f4; border-left: 2px solid #00bcd4;
+            animation: spinReverse 4s linear infinite; box-shadow: 0 0 8px rgba(3, 169, 244, 0.4);
+        }
+        
+        .ring-3 {
+            width: 55%; height: 55%; border: 2px dotted #ffc107; animation: spin 10s linear infinite; opacity: 0.6;
+        }
+
+        .core-center {
+            width: 25%; height: 25%; background: #fff; border-radius: 50%;
+            box-shadow: 0 0 15px #fff, 0 0 25px #ff9800; animation: pulseIdle 3s ease-in-out infinite;
+        }
+
+        .blaze-core.speaking .ring-1 { animation-duration: 1.5s; border-top-color: #ff1744; box-shadow: 0 0 20px rgba(255, 23, 68, 0.8); }
+        .blaze-core.speaking .ring-2 { animation-duration: 1s; box-shadow: 0 0 15px rgba(3, 169, 244, 0.8); }
+        .blaze-core.speaking .ring-3 { animation-duration: 2s; opacity: 1; }
+        .blaze-core.speaking .core-center { 
+            animation: pulseFast 0.4s ease-in-out infinite alternate; 
+            box-shadow: 0 0 20px #fff, 0 0 40px #ff5722; background: #ffeb3b;
+        }
+
+        @keyframes rgbFlow { 0% { background-position: 0% 50%; } 100% { background-position: 400% 50%; } }
+        @keyframes textChroma { 0%, 100% { color: #03a9f4; } 50% { color: #ff9800; } }
+        @keyframes gradientMove { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes spinReverse { 100% { transform: rotate(-360deg); } }
+        @keyframes pulseIdle { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } }
+        @keyframes pulseFast { 0% { transform: scale(0.9); } 100% { transform: scale(1.4); } }
+        
+        @media (max-width: 600px) {
+            .blaze-top-bar { font-size: 9px; padding: 0 10px; }
+            h1 { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <video id="camera-bg" autoplay playsinline muted></video>
+
+    <div class="blaze-top-bar">
+        <div class="rgb-line"></div>
+        <div id="blaze-time">TME: --:--:--</div>
+        <div id="blaze-coords" onclick="getGPS()">TAP TO SCAN LOC</div>
+        <div id="blaze-date">01 JAN 2026</div>
+    </div>
+
+    <div class="glowing-loader" id="loadingBar"></div>
+
+    <div class="search-container">
+        <h1 id="greeting">Hi Shubhjot, <span class="highlight-text">BLAZE</span> is online.</h1>
+        <div class="input-group">
+            <input type="text" id="searchQuery" placeholder="Ask BLAZE anything...">
+            
+            <button class="clear-btn" id="clearBtn" aria-label="Clear input">
+                <svg viewBox="0 0 24 24">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+
+            <button class="send-btn" id="sendBtn" aria-label="Search">
+                <svg viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+    
+    <div id="results"></div>
+
+    <div class="blaze-core" id="blazeCore">
+        <div class="blaze-ring ring-1"></div>
+        <div class="blaze-ring ring-2"></div>
+        <div class="blaze-ring ring-3"></div>
+        <div class="core-center"></div>
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('searchQuery');
+        const clearBtn = document.getElementById('clearBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const resultsDiv = document.getElementById('results');
+        const loadingBar = document.getElementById('loadingBar');
+        const greeting = document.getElementById('greeting');
+        const blazeCore = document.getElementById('blazeCore');
+        
+        let currentAiText = "";
+        let isSpeaking = false;
+
+        // --- BACKGROUND CAMERA ENGINE ---
+        async function startCamera() {
+            try {
+                // Request environment facing camera (back camera)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" } 
+                });
+                const videoElement = document.getElementById('camera-bg');
+                videoElement.srcObject = stream;
+            } catch (err) {
+                console.warn("Camera access denied or unavailable. Falling back to solid background.", err);
+            }
+        }
+        // Initialize camera on load
+        startCamera();
+
+        // --- CLOCK ENGINE ---
+        function updateSensors() {
+            const now = new Date();
+            document.getElementById('blaze-time').innerText = "TME: " + now.toLocaleTimeString('en-US', { hour12: true });
+            document.getElementById('blaze-date').innerText = now.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
+        }
+        setInterval(updateSensors, 1000);
+        updateSensors();
+
+        // --- GEOLOCATION ENGINE (SANDBOX SAFE) ---
+        function getGPS() {
+            const coordDisplay = document.getElementById('blaze-coords');
+            coordDisplay.innerText = "SCANNING...";
+
+            if (!navigator.geolocation) {
+                coordDisplay.innerText = "LOC: BLOCKED BY SANDBOX";
+                return;
+            }
+
+            const options = { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 };
+
+            try {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        coordDisplay.innerText = `LAT: ${pos.coords.latitude.toFixed(3)} | LON: ${pos.coords.longitude.toFixed(3)}`;
+                    }, 
+                    (err) => {
+                        if (err.code === 1) coordDisplay.innerText = "LOC: SCANNING";
+                        else if (err.code === 3) coordDisplay.innerText = "LOC: TIMEOUT";
+                        else coordDisplay.innerText = "LOC: UNAVAILABLE";
+                    },
+                    options
+                );
+            } catch (error) {
+                coordDisplay.innerText = "LOC: BLOCKED BY SANDBOX";
+            }
+        }
+        getGPS();
+
+        // --- SPEECH ENGINE (SANDBOX SAFE) ---
+        window.toggleSpeech = function() {
+            if (!('speechSynthesis' in window)) return alert("Speech blocked by iframe/browser.");
+            
+            if (isSpeaking) {
+                window.speechSynthesis.cancel();
+                stopSpeakingVisuals();
+            } else {
+                startSpeakingText(currentAiText);
+            }
+        };
+
+        function startSpeakingText(text) {
+            if (!('speechSynthesis' in window) || !text) return;
+            
+            try {
+                window.speechSynthesis.cancel(); 
+                const cleanText = text.replace(/[*#_]/g, '').trim();
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = 'en-US';
+                
+                utterance.onstart = () => startSpeakingVisuals();
+                utterance.onend = () => stopSpeakingVisuals();
+                utterance.onerror = () => stopSpeakingVisuals();
+
+                window.speechSynthesis.speak(utterance);
+            } catch(e) {
+                console.warn("Speech Synthesis blocked:", e);
+            }
+        }
+
+        function startSpeakingVisuals() {
+            isSpeaking = true;
+            blazeCore.classList.add('speaking'); 
+            const speakerBtn = document.getElementById('speakerBtn');
+            const speakerIcon = document.getElementById('speakerIcon');
+            if(speakerBtn) {
+                speakerBtn.classList.add('playing');
+                speakerIcon.innerHTML = '<path d="M6 6h12v12H6z"/>'; // Stop icon
+            }
+        }
+
+        function stopSpeakingVisuals() {
+            isSpeaking = false;
+            blazeCore.classList.remove('speaking'); 
+            const speakerBtn = document.getElementById('speakerBtn');
+            const speakerIcon = document.getElementById('speakerIcon');
+            if(speakerBtn) {
+                speakerBtn.classList.remove('playing');
+                speakerIcon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>'; // Vol icon
+            }
+        }
+
+        // --- INPUT UI & SEARCH ENGINE ---
+        searchInput.addEventListener('input', () => {
+            clearBtn.style.display = searchInput.value.length > 0 ? 'flex' : 'none';
+        });
+
+        clearBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            searchInput.focus(); 
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                stopSpeakingVisuals();
+            }
+        });
+
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performSearch();
+        });
+
+        sendBtn.addEventListener('click', performSearch); 
+
+        const API_KEY = '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'; 
+        
+        async function performSearch() {
+            const query = searchInput.value;
+            if (!query) return; 
+
+            if ('speechSynthesis' in window) {
+                try {
+                    window.speechSynthesis.cancel();
+                    stopSpeakingVisuals();
+                    let unlock = new SpeechSynthesisUtterance('');
+                    window.speechSynthesis.speak(unlock);
+                } catch(e) {}
+            }
+
+            greeting.style.display = 'none';
+            loadingBar.classList.add('active');
+
+            resultsDiv.innerHTML = `
+                <div class="user-query-row">
+                    <div class="user-bubble">${query}</div>
+                </div>
+                
+                <div class="ai-response-row" id="aiResponseBox">
+                    <div class="ai-header">
+                        <div class="ai-header-left">
+                            <span class="ai-title-text">BLAZE System</span>
+                        </div>
+                    </div>
+                    
+                    <div class="skeleton-loader">
+                        <div class="skeleton-line skeleton-title"></div>
+                        <div class="skeleton-line"></div>
+                        <div class="skeleton-line"></div>
+                        <div class="skeleton-line short"></div>
+                    </div>
+                </div>
+            `;
+
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+
+            try {
+                const response = await fetch('https://api.tavily.com/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+                    body: JSON.stringify({ query: query, include_answer: true, search_depth: "basic" })
+                });
+
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+                const data = await response.json();
+                const aiBox = document.getElementById('aiResponseBox');
+                loadingBar.classList.remove('active');
+
+                if (data.answer) {
+                    currentAiText = data.answer; 
+                    
+                    aiBox.innerHTML = `
+                        <div class="ai-header">
+                            <div class="ai-header-left">
+                                <span class="ai-title-text">BLAZE System</span>
+                            </div>
+                            <button class="speaker-btn" id="speakerBtn" onclick="toggleSpeech()" aria-label="Listen">
+                                <svg id="speakerIcon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="ai-answer">${data.answer}</div>
+                    `;
+                    
+                    startSpeakingText(currentAiText);
+
+                } else {
+                    aiBox.innerHTML = '<p style="color:#ffffff;">I could not locate an answer for that query, sir.</p>';
+                }
+
+            } catch (error) {
+                console.error("Error:", error);
+                loadingBar.classList.remove('active');
+                document.getElementById('aiResponseBox').innerHTML = '<p style="color:#ff1744;">Connection failed. Please check API key protocols or network rules.</p>';
+            }
+        }
+    </script>
+</body>
+</html>
